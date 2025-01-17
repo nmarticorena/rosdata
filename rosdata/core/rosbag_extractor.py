@@ -280,6 +280,9 @@ class ROSBagExtractor:
             print("\tExtracting topic %s data"%(topic_name))
             if self.extraction_config[topic_key]["message_type"].lower() == "sensor_msgs/image":
                 filelist, topic_frame_id = self._extract_image_topic(topic_key, output_dir)
+            
+            elif self.extraction_config[topic_key]["message_type"].lower() == "sensor_msgs/depth_image":
+                filelist, topic_frame_id = self._extract_depth_image_topic(topic_key, output_dir, self.extraction_config[topic_key]["depth_scale"])
 
             elif self.extraction_config[topic_key]["message_type"].lower() == "sensor_msgs/compressedimage":
                 filelist, topic_frame_id = self._extract_image_compressed_topic(topic_key, output_dir)
@@ -361,6 +364,7 @@ class ROSBagExtractor:
                 cv_image = cv_bridge.imgmsg_to_cv2(msg, "bgr8")
                 cv2.imwrite(str(output_dir / image_filename), cv_image)
             except CvBridgeError:
+
                 print("Unable to convert image %d"%(idx))
 
             # Add image to image_list
@@ -369,7 +373,50 @@ class ROSBagExtractor:
         # get topic frame id and return list 
         topic_frame_id = msg.header.frame_id
         return frame_list, topic_frame_id
+    
+    def _extract_depth_image_topic(self, topic_key : str, output_dir : pathlib.Path, depth_scale: float) -> tuple:
+        """Extracts an image topic (ROS message type sensor_msgs/Image) from the ROSBag.
 
+        Args:
+            topic_key (str): the topic key (e.g., topic_0) used to identify the portion
+                of the extraction config data containing the extraction parameters.
+            output_dir (pathlib.Path): the output directory to write this data to
+
+        Returns:
+            tuple: returns a tuple(list, str). The list contains the filenames 
+                and timestamps [filaname (str), timestamp (float)]. The string
+                contains the frame ID for the topic.
+        """
+
+        # Get topic name and filename template
+        topic_name, _, filename_template = self._get_common_topic_extraction_data(topic_key)
+
+        # Define Variables
+        cv_bridge = CvBridge()
+        topic_count = self.bag.get_message_count(topic_name)
+        frame_list = [None]*topic_count # pre-allocate list memory
+
+        # Loop through bag
+        for idx, (_, msg, t) in enumerate(tqdm(self.bag.read_messages(topics=[topic_name]), total=topic_count)):
+            # Create image filename
+            timestamp_str = str(t.to_sec()).replace(".", "_")
+            image_filename = (filename_template%(idx)).replace("<ros_timestamp>", timestamp_str) + ".png"
+
+            # Save image, but first need to convert to OpenCV image
+            try:
+                cv_image = cv_bridge.imgmsg_to_cv2(msg, "passthrough")
+                cv_image = np.uint16(cv_image * depth_scale)
+                cv2.imwrite(str(output_dir / image_filename), cv_image, [cv2.CV_16UC1])
+            except CvBridgeError:
+
+                print("Unable to convert image %d"%(idx))
+
+            # Add image to image_list
+            frame_list[idx] = [image_filename, t.to_sec()]
+
+        # get topic frame id and return list 
+        topic_frame_id = msg.header.frame_id
+        return frame_list, topic_frame_id
     
     def _extract_image_compressed_topic(self, topic_key, output_dir):
         """Extracts a compressed image topic (ROS message type sensor_msgs/CompressedImage) 
