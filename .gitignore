@@ -156,3 +156,6 @@ example/data/
 
 # Ignore vscode
 .vscode/
+# pixi environments
+.pixi
+*.egg-info
